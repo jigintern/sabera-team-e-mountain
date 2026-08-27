@@ -23,27 +23,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.jigglass.glass.CommandManager
 import app.jigglass.glass.GlassManager
 import jp.jig.glasses.sample.kmp.geo.ObservationDefaults
 import jp.jig.glasses.sample.kmp.glass.BundledData
 import jp.jig.glasses.sample.kmp.glass.PANEL_HEIGHT
 import jp.jig.glasses.sample.kmp.glass.PANEL_WIDTH
-import jp.jig.glasses.sample.kmp.glass.RIDGE_HEIGHT
 import jp.jig.glasses.sample.kmp.glass.RIDGE_IMAGE_ID
-import jp.jig.glasses.sample.kmp.glass.RIDGE_WIDTH
-import jp.jig.glasses.sample.kmp.glass.RidgeRenderer
-import jp.jig.glasses.sample.kmp.glass.canvasBufferUsageBytes
+import jp.jig.glasses.sample.kmp.glass.RidgeMap
+import jp.jig.glasses.sample.kmp.glass.batched
+import jp.jig.glasses.sample.kmp.glass.clearedCanvasText
 import jp.jig.glasses.sample.kmp.glass.compressedSizeBytes
+import jp.jig.glasses.sample.kmp.glass.toCanvasElements
 import jp.jig.glasses.sample.kmp.terrain.RidgeSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 段階4の画面。**同梱の地形から本物の稜線を焼いてグラスへ出す。**
+ * 段階4〜5の画面。**同梱の地形から本物の稜線と山名を焼いてグラスへ出す。**
  *
  * 方位はスライダーで動かす。段階6でヨーとつなぐまでの仮の入口だが、
- * **実機で「向けた方角の稜線が出る」ことはこれで確かめられる**。
+ * **実機で「向けた方角の稜線と、そこに立っている山の名前が出る」ことはこれで確かめられる**。
  */
 @Composable
 fun MinemiruApp(manager: GlassManager) {
@@ -53,7 +54,11 @@ fun MinemiruApp(manager: GlassManager) {
     val commands = remember(client) { client?.createCommandManager() }
     val scope = rememberCoroutineScope()
 
-    val session = remember { RidgeSession(BundledData.elevation(context)) }
+    // **山名は地平線と同じ焼き直しに乗せる。** 別々に焼くと新しい稜線に古い名前が乗る
+    val session = remember { RidgeSession(BundledData.elevation(context), BundledData.peaks(context)) }
+    // グラスに今出ている文字。**消え残りを消すために覚えておく**（前より短い名前で
+    // 上書きすると、前の名前の末尾が画面に残る）
+    var shownElements by remember { mutableStateOf(emptyList<CommandManager.CanvasElement>()) }
     var azimuth by remember { mutableFloatStateOf(65.77f) }
     var altitude by remember { mutableFloatStateOf(2.0f) }
     var baking by remember { mutableStateOf(true) }
@@ -75,7 +80,9 @@ fun MinemiruApp(manager: GlassManager) {
             "地平線を焼けませんでした（${ms}ms）: ${error.message}"
         } else {
             val at = session.bakedAt!!
-            "地平線を焼きました（${ms}ms・観測地の標高 ${"%.1f".format(at.elevationM)}m）"
+            val panorama = session.panorama!!
+            "地平線を焼きました（${ms}ms・観測地の標高 ${"%.1f".format(at.elevationM)}m・" +
+                "見える山 ${panorama.peaks.size} 座うち百名山 ${panorama.famous.size} 座）"
         }
     }
 
@@ -124,27 +131,34 @@ fun MinemiruApp(manager: GlassManager) {
             onClick = {
                 val cm = commands ?: return@Button
                 val profile = session.profile ?: return@Button
+                val panorama = session.panorama ?: return@Button
                 scope.launch {
-                    val gray = withContext(Dispatchers.Default) {
-                        RidgeRenderer.render(profile, azimuth.toDouble(), altitude.toDouble())
+                    // **絵と名前は 1 回の bake から取る。** 別々に呼ぶと向きがずれ得る
+                    val map = withContext(Dispatchers.Default) {
+                        RidgeMap.bake(profile, panorama, azimuth.toDouble(), altitude.toDouble())
                     }
-                    val used = canvasBufferUsageBytes(RIDGE_WIDTH, RIDGE_HEIGHT, gray)
                     // **送る前に自分で数える。** 溢れると SDK が黙って弾き、前の絵が残る
-                    if (used > jp.jig.glasses.sample.kmp.glass.CANVAS_IMAGE_BUFFER_BYTES) {
-                        status = "バッファ超過 $used バイト。送らない"
+                    if (!map.fitsBuffer) {
+                        status = "バッファ超過 ${map.bufferUsageBytes} バイト。送らない"
                         return@launch
                     }
-                    status = "送っています… $used バイト（圧縮後 ${compressedSizeBytes(gray)}）"
+                    val names = map.shownPeaks.joinToString("・") { it.label }.ifEmpty { "なし" }
+                    status = "送っています… ${map.bufferUsageBytes} バイト（圧縮後 ${compressedSizeBytes(map.gray)}）"
                     runCatching {
+                        // **画像を先に積み、山名はその後ろに続ける。** 逆にすると、
+                        // 転送中に名前だけが浮いて見える（星しるべの実機で確認済み）
                         cm.sendCanvasImage(
                             id = RIDGE_IMAGE_ID,
-                            x = (PANEL_WIDTH - RIDGE_WIDTH) / 2,
-                            y = (PANEL_HEIGHT - RIDGE_HEIGHT) / 2,
-                            width = RIDGE_WIDTH,
-                            height = RIDGE_HEIGHT,
-                            grayscale = gray,
+                            x = (PANEL_WIDTH - map.width) / 2,
+                            y = (PANEL_HEIGHT - map.height) / 2,
+                            width = map.width,
+                            height = map.height,
+                            grayscale = map.gray,
                         )
-                    }.onSuccess { status = "稜線を送りました（$used バイト）" }
+                        val elements = map.labels.toCanvasElements(map.width, map.height)
+                        for (batch in elements.batched(shownElements)) cm.sendCanvasElements(batch)
+                        shownElements = elements
+                    }.onSuccess { status = "稜線と山名を送りました（${map.bufferUsageBytes} バイト）: $names" }
                         .onFailure { status = "失敗: ${it.message}" }
                 }
             },
@@ -155,7 +169,12 @@ fun MinemiruApp(manager: GlassManager) {
             onClick = {
                 val cm = commands ?: return@Button
                 scope.launch {
-                    runCatching { cm.removeCanvasImage(RIDGE_IMAGE_ID) }
+                    runCatching {
+                        cm.removeCanvasImage(RIDGE_IMAGE_ID)
+                        // **文字は画像と別に残る。** 消さないと次の絵に前の山名が重なって出る
+                        cm.sendCanvasElements(clearedCanvasText())
+                    }
+                    shownElements = emptyList()
                     status = "消しました"
                 }
             },
