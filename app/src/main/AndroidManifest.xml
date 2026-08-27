@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 観測地の測位。**稜線は 50m 動けば作り直しが要る**ので精度が要る。
+         Android 12 以降は FINE だけだと「おおよその位置」を選ばれたときに落ちる -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <!-- 方位合わせの進み具合を手へ返す。**画面を読めない姿勢で受け取る合図**なので、
+         UI の軽いコツンでは弱く、強さを決められる Vibrator を使う -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="true" />
+
+    <application
+        android:name=".SaberaApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:label="峰ミル"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Sabera">
+
+        <!--
+            回転は Compose の再構成だけで受ける。Activity を作り直すと、グラスに置いた
+            テキスト枠の記憶が消え、実物のラベルだけが残るため（星しるべで踏んだ）。
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="fullUser">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="app.jigglass.ble.BleCompanionDeviceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
