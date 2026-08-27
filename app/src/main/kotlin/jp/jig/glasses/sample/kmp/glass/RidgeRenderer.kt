@@ -1,11 +1,12 @@
 package jp.jig.glasses.sample.kmp.glass
 
 import jp.jig.glasses.sample.kmp.geo.Basis
+import jp.jig.glasses.sample.kmp.glass.CardinalMarks.cardinalMarks
 import jp.jig.glasses.sample.kmp.geo.ObservationDefaults
-import jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg
 import jp.jig.glasses.sample.kmp.geo.enu
 import jp.jig.glasses.sample.kmp.geo.project
 import jp.jig.glasses.sample.kmp.geo.projectionScale
+import jp.jig.glasses.sample.kmp.geo.Geodesy
 import jp.jig.glasses.sample.kmp.terrain.HorizonProfile
 import jp.jig.glasses.sample.kmp.terrain.Raycaster
 
@@ -37,6 +38,8 @@ object RidgeRenderer {
      * @param altimeterDeg いま向いている仰角
      * @param rollDeg 首の傾き
      * @param fovDeg 水平画角。**既定は未実測の仮値**（[ObservationDefaults.FOV_DEG]）
+     * @param cardinals 方位の目印（N/E/S/W）を焼くか。**ずれに気付くための物差し**
+     *   ([CardinalMarks])。邪魔なら実機で切って比べられるように引数にしてある
      */
     fun render(
         profile: HorizonProfile,
@@ -46,6 +49,7 @@ object RidgeRenderer {
         width: Int = RIDGE_WIDTH,
         height: Int = RIDGE_HEIGHT,
         fovDeg: Double = ObservationDefaults.FOV_DEG,
+        cardinals: Boolean = true,
     ): ByteArray {
         val gray = ByteArray(width * height)
         val basis = Basis(azimuthDeg, altitudeDeg, rollDeg)
@@ -64,8 +68,9 @@ object RidgeRenderer {
                 previous = null
                 continue
             }
-            // **大気差は星より効く。** 稜線は高度 0° 付近に居るので、0° で約 29′ 持ち上がる
-            val point = project(enu(az, apparentAltitudeDeg(alt)), basis, k, width, height)
+            // **ここで大気差を掛けない。** [Geodesy.apparentDropM] が屈折係数 k=0.13 として
+            // すでに織り込んでいるので、[apparentAltitudeDeg] を重ねると二重になる
+            val point = project(enu(az, alt), basis, k, width, height)
             if (point == null) {
                 flush(gray, width, height, screen, radius)
                 previous = null
@@ -81,6 +86,10 @@ object RidgeRenderer {
             previous = point
         }
         flush(gray, width, height, screen, radius)
+
+        // **稜線を引き終わってから方位を置く。** 重なったところは方位（一段暗い）が勝つが、
+        // 方位は下辺に固定してあるので、稜線と重なるのは足元が高く見える方角だけ
+        if (cardinals) gray.cardinalMarks(width, height, basis, k)
         return gray
     }
 

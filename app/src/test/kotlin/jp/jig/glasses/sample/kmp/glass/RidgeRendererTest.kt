@@ -77,4 +77,36 @@ class RidgeRendererTest {
         val file = GlassPng.save(gray, RIDGE_WIDTH, RIDGE_HEIGHT, "build/ridge", name)
         println("稜線の絵: ${file.absolutePath}")
     }
+
+    /**
+     * **大気差を二重に掛けていないことの歯止め。**
+     *
+     * 地上の的の大気差は [jp.jig.glasses.sample.kmp.geo.Geodesy.apparentDropM] の
+     * 屈折係数 k=0.13 に入りきっている。星のための
+     * [jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg] を描くときに重ねると、
+     * 地平線で +0.48°・白山の 2.4° で +0.26° 持ち上がり、しかも**低いほど強く効くので
+     * 稜線の形そのものが縦に 8% 縮む**。実景に重ねるのが目的なので、これは効く。
+     *
+     * 向いた仰角ちょうどの稜線は、**画面のちょうど真ん中**を通らなければならない。
+     */
+    @Test
+    fun `向いた仰角そのままの稜線は画面の中央を通る`() {
+        val az = 65.77
+        val gray = RidgeRenderer.render(profile, azimuthDeg = az, altitudeDeg = profile.altitudeDeg(az))
+        val center = RIDGE_WIDTH / 2
+        val rows = (0 until RIDGE_HEIGHT).filter { gray[it * RIDGE_WIDTH + center].toInt() != 0 }
+        assertTrue("中央の列に稜線が出ていない", rows.isNotEmpty())
+        // 線には幅があるので帯の中心で見る
+        val drawn = (rows.first() + rows.last()) / 2.0
+        val pxPerDeg = RIDGE_HEIGHT / verticalFovDeg(RIDGE_WIDTH, RIDGE_HEIGHT, 35.0)
+        // 二重掛けだと +0.26° ぶん（約 4px）上へずれる。1px は投影とレイ刻みの端数
+        assertEquals("稜線が中央から ${"%.2f".format((RIDGE_HEIGHT / 2.0 - drawn) / pxPerDeg)}° ずれている",
+            RIDGE_HEIGHT / 2.0, drawn, 2.0)
+    }
+
+    /** 縦の画角[度]。ステレオ投影なので横 × 縦横比ではない */
+    private fun verticalFovDeg(width: Int, height: Int, fovDeg: Double): Double {
+        val k = jp.jig.glasses.sample.kmp.geo.projectionScale(width, fovDeg)
+        return 4.0 * Math.toDegrees(Math.atan(height / (4.0 * k)))
+    }
 }

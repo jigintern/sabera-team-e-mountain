@@ -105,4 +105,27 @@ class PeakLabelsTest {
             shown.map { it.label },
         )
     }
+
+    /**
+     * **絵と名前で仰角の扱いが揃っていることの歯止め。**
+     *
+     * 山の仰角ちょうどを向いたら、その名前は画面のど真ん中（[PeakLabels.LABEL_OFFSET_PX] だけ上）
+     * に来なければならない。地上の的の大気差は
+     * [jp.jig.glasses.sample.kmp.geo.Geodesy.apparentDropM] に入りきっているので、
+     * 星のための [jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg] を重ねると
+     * ここが 4px 上へずれ、**稜線と名前が別々にずれる**。
+     */
+    @Test
+    fun `山の方位と仰角そのままを向くと名前が中央に来る`() {
+        val hakusan = sabae.peaks.first { it.label == "白山" }
+        val placed = PeakLabels.place(sabae, hakusan.azimuthDeg, hakusan.altitudeDeg)
+        val label = placed.first { it.label == "白山" }
+        assertEquals("白山の名前が横にずれている", RIDGE_WIDTH / 2.0, label.x.toDouble(), 2.0)
+        assertEquals(
+            "白山の名前が縦にずれている（大気差の二重掛けを疑う）",
+            (RIDGE_HEIGHT / 2 - PeakLabels.LABEL_OFFSET_PX).toDouble(), label.y.toDouble(), 2.0,
+        )
+        // 主役の判定も山頂で測っているので、真ん中を向いていれば白山になる
+        assertEquals("白山", PeakLabels.nearestToCenter(placed)?.label)
+    }
 }

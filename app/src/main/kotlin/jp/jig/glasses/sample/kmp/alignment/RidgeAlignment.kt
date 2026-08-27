@@ -2,8 +2,8 @@ package jp.jig.glasses.sample.kmp.alignment
 
 import jp.jig.glasses.sample.kmp.geo.Basis
 import jp.jig.glasses.sample.kmp.geo.DEG
-import jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg
 import jp.jig.glasses.sample.kmp.geo.azimuthFromYaw
+import jp.jig.glasses.sample.kmp.geo.Geodesy
 import jp.jig.glasses.sample.kmp.geo.enu
 import jp.jig.glasses.sample.kmp.geo.headingOffsetFor
 import jp.jig.glasses.sample.kmp.geo.normalizeDeg
@@ -51,7 +51,10 @@ object RidgeAlignment {
     data class Hold(
         /** 入れた峰の真方位[度]。カタログから引く */
         val peakAzimuthDeg: Double,
-        /** 同じ峰の真仰角[度]。**大気差を掛ける前の値**（[project] へ渡す前にここで掛ける） */
+        /**
+         * 同じ峰の仰角[度]。**[Geodesy.altitudeDeg] が返す見かけの仰角をそのまま渡す。**
+         * 大気差は落ち込みの係数 k=0.13 に入っているので、ここで足さない。
+         */
         val peakAltitudeDeg: Double,
         /** そのときのヨー[度]。[YawDriftCorrector] を通したもの */
         val yawDeg: Double,
@@ -81,8 +84,8 @@ object RidgeAlignment {
     fun fovDegFrom(hold: Hold, headingOffsetDeg: Double, width: Int, height: Int): Double? {
         val azimuth = azimuthFromYaw(hold.yawDeg, headingOffsetDeg)
         val basis = Basis(azimuth, hold.pitchDeg, hold.rollDeg)
-        // **稜線と同じ大気差を掛ける。** 掛けないと較正そのものが 0.5° ずれる
-        val direction = enu(hold.peakAzimuthDeg, apparentAltitudeDeg(hold.peakAltitudeDeg))
+        // **稜線と同じ式を通す。** 較正と絵で仰角の扱いが違うと、合わせたつもりでずれる
+        val direction = enu(hold.peakAzimuthDeg, hold.peakAltitudeDeg)
         val unit = project(direction, basis, 1.0, width, height) ?: return null
 
         val unitOffset = unit[0] - width / 2.0

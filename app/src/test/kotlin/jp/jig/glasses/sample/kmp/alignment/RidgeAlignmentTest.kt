@@ -1,7 +1,6 @@
 package jp.jig.glasses.sample.kmp.alignment
 
 import jp.jig.glasses.sample.kmp.geo.Basis
-import jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg
 import jp.jig.glasses.sample.kmp.geo.azimuthFromYaw
 import jp.jig.glasses.sample.kmp.geo.enu
 import jp.jig.glasses.sample.kmp.geo.headingOffsetFor
@@ -35,7 +34,7 @@ class RidgeAlignmentTest {
     ): Double {
         val basis = Basis(azimuthFromYaw(yawDeg, headingOffsetDeg), pitchDeg, rollDeg)
         val k = projectionScale(RIDGE_WIDTH, fovDeg)
-        val q = project(enu(peakAzimuthDeg, apparentAltitudeDeg(peakAltitudeDeg)), basis, k, RIDGE_WIDTH, RIDGE_HEIGHT)
+        val q = project(enu(peakAzimuthDeg, peakAltitudeDeg), basis, k, RIDGE_WIDTH, RIDGE_HEIGHT)
         return requireNotNull(q)[0]
     }
 

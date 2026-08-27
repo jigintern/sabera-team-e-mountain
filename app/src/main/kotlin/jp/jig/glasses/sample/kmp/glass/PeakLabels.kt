@@ -1,8 +1,8 @@
 package jp.jig.glasses.sample.kmp.glass
 
 import jp.jig.glasses.sample.kmp.geo.Basis
+import jp.jig.glasses.sample.kmp.geo.Geodesy
 import jp.jig.glasses.sample.kmp.geo.ObservationDefaults
-import jp.jig.glasses.sample.kmp.geo.apparentAltitudeDeg
 import jp.jig.glasses.sample.kmp.geo.enu
 import jp.jig.glasses.sample.kmp.geo.project
 import jp.jig.glasses.sample.kmp.geo.projectionScale
@@ -77,8 +77,9 @@ object PeakLabels {
         val onScreen = ArrayList<PlacedPeak>()
         // 視野の半分より広めに拾う。首を傾けると画面の隅は fov/2 より外まで届く
         for (sighted in panorama.around(azimuthDeg, fovDeg)) {
-            // **稜線と同じ大気差を掛ける。** 掛け忘れると、名前だけが山より 0.5° 低く出る
-            val direction = enu(sighted.azimuthDeg, apparentAltitudeDeg(sighted.altitudeDeg))
+            // **稜線とまったく同じ式を通す。** [SightedPeak.altitudeDeg] は
+            // [Geodesy.apparentDropM] を通った見かけの仰角なので、大気差はもう入っている
+            val direction = enu(sighted.azimuthDeg, sighted.altitudeDeg)
             val q = project(direction, basis, k, width, height) ?: continue
             val x = q[0].roundToInt()
             val y = q[1].roundToInt() - LABEL_OFFSET_PX

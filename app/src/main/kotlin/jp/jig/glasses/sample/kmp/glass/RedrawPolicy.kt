@@ -4,7 +4,8 @@ import jp.jig.glasses.sample.kmp.geo.angleBetweenDeg
 import jp.jig.glasses.sample.kmp.geo.enu
 
 // 稜線をいつ描き直すか（送るか）の方針の数値。**動きに追従させると点滅にしかならない**ので、
-// 「止まってから送る」「減速に入ったら止まる先へ 1 枚だけ先出しする」を数字で決めている。
+// 「**止まってから送る**」を数字で決めている。
+// （減速中の先出しは判定だけ書いてあって**配線していない** —— 下の注記）
 //
 // **数値は星しるべが実機で詰めたもの**をそのまま引き継いでいる（星図 528×330 の転送が
 // 332〜390ms・パケット 200 バイトが 8〜9ms）。峰ミルの絵も同じ大きさ・同じ枚数なので、
@@ -62,8 +63,21 @@ const val SETTLE_MS = 80L
  */
 const val REDRAW_ROLL_DEG = 5.0
 
+// ---------------------------------------------------------------------------
+// ここから下（先出し）は **まだどの画面からも呼ばれていない**。
+//
+// [RedrawDecider.shouldPredict] / [RedrawDecider.onPredicted] / [PREDICT_DAMPING] /
+// [PREDICT_COOLDOWN_MS] と [jp.jig.glasses.sample.kmp.alignment.HeadMotion] は
+// 書いてテストも通してあるが、[jp.jig.glasses.sample.kmp.ui.RidgeScreen] は
+// **止まってから送るだけ**で、減速中の先出しはしていない。
+//
+// 意図して切ってある。**外すと点滅が増える方向にしか転ばない**ので、
+// 実機で「止めてから出るまでが遅い」と分かってから入れる。入れる場所は
+// RidgeScreen の追従ループ 1 か所（shouldRedraw の隣で shouldPredict を見る）。
+// ---------------------------------------------------------------------------
+
 /**
- * 先出しの外挿をどれだけ割り引くか（0..1）。
+ * 先出しの外挿をどれだけ割り引くか（0..1）。**未配線**（上の注記）。
  *
  * **行き過ぎるより届かないほうが安全。** 足りない分は止まったあとの描き直しが埋めるが、
  * 行き過ぎた絵は**実景に重ならない稜線**として出たままになる。
@@ -87,11 +101,6 @@ const val PREDICT_COOLDOWN_MS = 1_200L
 const val ROLL_SMOOTHING = 0.2
 
 /**
- * 追従ループ 1 周ぶんの判断。**時刻は引数で受ける**ので JVM テストで固定できる。
- *
- * 判定だけを持ち、送る・焼くはしない（送る側の都合は [jp.jig.glasses.sample.kmp.ui.RidgeScreen] が知っている）。
- */
-/**
  * 2 つの視線の、**空の上での隔たり**[度]。
  *
  * **方位の差をそのまま使わない。** 見上げるほど方位は同じ首の動きで大きく動くので、
@@ -104,6 +113,12 @@ const val ROLL_SMOOTHING = 0.2
 fun lookSeparationDeg(fromAzDeg: Double, fromAltDeg: Double, toAzDeg: Double, toAltDeg: Double): Double =
     angleBetweenDeg(enu(fromAzDeg, fromAltDeg), enu(toAzDeg, toAltDeg))
 
+/**
+ * 追従ループ 1 周ぶんの判断。**時刻は引数で受ける**ので JVM テストで固定できる。
+ *
+ * 判定だけを持ち、送る・焼くはしない
+ * （送る側の都合は [jp.jig.glasses.sample.kmp.ui.RidgeScreen] が知っている）。
+ */
 class RedrawDecider {
 
     private var previousAz = Double.NaN
@@ -129,7 +144,11 @@ class RedrawDecider {
     fun shouldRedraw(settled: Boolean, observationChanged: Boolean, driftDeg: Double, rolledDeg: Double): Boolean =
         settled && (observationChanged || driftDeg > REDRAW_DEG || rolledDeg > REDRAW_ROLL_DEG)
 
-    /** 減速に入ったら「止まる先」へ 1 枚だけ先出しするか。連発は [PREDICT_COOLDOWN_MS] で抑える */
+    /**
+     * 減速に入ったら「止まる先」へ 1 枚だけ先出しするか。連発は [PREDICT_COOLDOWN_MS] で抑える。
+     *
+     * **まだ呼ばれていない。** 判定だけ用意してある（このファイル冒頭の注記）。
+     */
     fun shouldPredict(nowMillis: Long, driftDeg: Double, slowing: Boolean): Boolean =
         driftDeg > REDRAW_DEG && slowing && nowMillis - predictedAt > PREDICT_COOLDOWN_MS
 

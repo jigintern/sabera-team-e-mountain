@@ -232,6 +232,10 @@ fun RidgeScreen(
         // **前に動いていたアプリの文字が残っている。** 消してから始める
         runCatching { commands.sendCanvasElements(clearedCanvasText()) }
 
+        // **6DoF が 1 サンプルも来ないうちは送らない。** ヨーの初期値は 0 なので、
+        // 待たずに送ると「北を向いた稜線」を 1 枚（0.4 秒）出してから正しい向きへ描き直す
+        while (lastImuAt == 0L) delay(FOLLOW_TICK_MS)
+
         while (true) {
             val now = SystemClock.elapsedRealtime()
             val az = azimuthNow()

@@ -27,6 +27,8 @@ import kotlin.math.hypot
  *
  * Android に触らないので JVM テストで固定できる。
  */
+// **まだどの画面からも使われていない。** 先出し（[jp.jig.glasses.sample.kmp.glass.PREDICT_DAMPING]
+// の注記）専用で、その先出しを意図して切ってあるため。テストは通っている。
 class HeadMotion(private val windowMs: Long = WINDOW_MS) {
 
     private class Sample(val atMs: Long, val azDeg: Double, val altDeg: Double)

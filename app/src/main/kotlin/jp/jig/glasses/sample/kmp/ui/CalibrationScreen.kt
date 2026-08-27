@@ -266,6 +266,10 @@ fun CalibrationScreen(
 
         runCatching { commands.removeCanvasImage(CalibrationMarker.IMAGE_ID) }
 
+        // **6DoF を待つ。** ヨーの初期値 0 のまま焼くと、印に入れる前から
+        // 見当違いの稜線が出て「合わせる」動作が始められない
+        while (!imuSeen) delay(HOLD_TICK_MS)
+
         var stillSince = 0L
         var lastAz = Double.NaN
         var lastSentAz = Double.NaN
@@ -279,9 +283,11 @@ fun CalibrationScreen(
                 val map = withContext(Dispatchers.Default) {
                     RidgeMap.bake(profile, panorama, az, pitch, roll, fovDeg = fov)
                 }
+                // **印を描いてから数える。** 印は縦線なので行ごとに RLE の run が増える。
+                // 数えたあとに描くと、上限判定が実際に送るものより小さい絵についてしまう
+                // （[RidgeMap.bufferUsageBytes] は lazy なので、先に触ると古い値が焼き付く）
+                map.gray.sightMark(map.width, map.height, markX.toInt())
                 if (map.fitsBuffer) {
-                    // **印が無いと「真ん中に入れて」が成立しない**（[sightMark]）
-                    map.gray.sightMark(map.width, map.height, markX.toInt())
                     runCatching {
                         commands.sendCanvasImage(
                             id = RIDGE_IMAGE_ID,
