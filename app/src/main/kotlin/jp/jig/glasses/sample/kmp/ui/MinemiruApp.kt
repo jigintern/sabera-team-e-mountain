@@ -1,5 +1,6 @@
 package jp.jig.glasses.sample.kmp.ui
 
+import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,6 +48,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun MinemiruApp(manager: GlassManager) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val client by manager.connectedDevice.collectAsState(initial = null)
     val commands = remember(client) { client?.createCommandManager() }
     val scope = rememberCoroutineScope()
@@ -60,13 +62,21 @@ fun MinemiruApp(manager: GlassManager) {
     // **位置が確定したときに 1 回だけ焼く。** 首の動きでは焼き直さない
     LaunchedEffect(Unit) {
         val started = System.nanoTime()
-        withContext(Dispatchers.Default) {
-            session.bake(ObservationDefaults.DEFAULT_LAT_DEG, ObservationDefaults.DEFAULT_LON_DEG)
-        }
+        // **失敗しても baking を戻す。** 例外で LaunchedEffect が死ぬと
+        // ボタンが永久にグレーアウトし、画面には理由が何も出ない
+        val error = runCatching {
+            withContext(Dispatchers.Default) {
+                session.bake(ObservationDefaults.DEFAULT_LAT_DEG, ObservationDefaults.DEFAULT_LON_DEG)
+            }
+        }.exceptionOrNull()
         val ms = (System.nanoTime() - started) / 1_000_000
-        val at = session.bakedAt!!
         baking = false
-        status = "地平線を焼きました（${ms}ms・観測地の標高 ${"%.1f".format(at.elevationM)}m）"
+        status = if (error != null) {
+            "地平線を焼けませんでした（${ms}ms）: ${error.message}"
+        } else {
+            val at = session.bakedAt!!
+            "地平線を焼きました（${ms}ms・観測地の標高 ${"%.1f".format(at.elevationM)}m）"
+        }
     }
 
     Column(
@@ -77,6 +87,22 @@ fun MinemiruApp(manager: GlassManager) {
         Text("峰ミル", style = MaterialTheme.typography.headlineMedium)
         Text(if (commands == null) "グラス未接続" else "グラス接続済み", style = MaterialTheme.typography.bodyLarge)
         Text(status, style = MaterialTheme.typography.bodySmall)
+
+        // **ここが無いとグラスに一度もつながらない。** applicationId を星しるべと分けたので、
+        // BLE の紐付け（CompanionDeviceManager の association）は引き継がれない。
+        // connectToLastDevice は「前に選んだ端末」がある前提なので、初回は自分で選ばせる
+        if (commands == null) {
+            Button(
+                onClick = {
+                    val a = activity ?: return@Button
+                    scope.launch {
+                        status = "グラスを探しています…"
+                        runCatching { manager.showAutomaticSelectionDialog(a) }
+                            .onFailure { status = "探せませんでした: ${it.message}" }
+                    }
+                },
+            ) { Text("グラスを探す") }
+        }
 
         Text("方位 ${"%.1f".format(azimuth)}°（65.8° が白山・167.5° が日野山）")
         Slider(
