@@ -82,6 +82,9 @@ fun MinemiruApp(manager: GlassManager) {
     var fovDeg by rememberSaveable { mutableDoubleStateOf(ObservationDefaults.FOV_DEG) }
     var fovMeasured by rememberSaveable { mutableStateOf(false) }
 
+    /** 方位オフセットを稜線合わせ（2 段目）で取ったか。粗合わせだけなら false */
+    var headingMeasured by rememberSaveable { mutableStateOf(false) }
+
     val connectedClient by manager.connectedDevice.collectAsState(initial = null)
     var observingClient by remember { mutableStateOf<GlassClient?>(null) }
     var connectionLost by rememberSaveable { mutableStateOf(false) }
@@ -182,10 +185,12 @@ fun MinemiruApp(manager: GlassManager) {
                 onCalibrated = { result ->
                     headingOffset = result.headingOffsetDeg
                     fovDeg = result.fovDeg
+                    // **一度でも実測できたら下げない。** 合わせ直しで途中でやめても、
+                    // 前に取った実測値はそのまま使い続けている
                     if (result.fovMeasured) fovMeasured = true
+                    if (result.headingMeasured) headingMeasured = true
                     screen = AppScreen.RIDGE
                 },
-                onSkip = { screen = AppScreen.RIDGE },
                 onHome = { screen = AppScreen.HOME },
             )
         }
@@ -203,6 +208,8 @@ fun MinemiruApp(manager: GlassManager) {
                 background = background,
                 headingOffsetDeg = headingOffset,
                 fovDeg = fovDeg,
+                fovMeasured = fovMeasured,
+                headingMeasured = headingMeasured,
                 onRecalibrate = { screen = AppScreen.CALIBRATION },
                 // ボタンは**確認を出すだけ**。切断は戻るキーと同じ出口に合流させる
                 onRequestLeave = { confirmLeaving = true },

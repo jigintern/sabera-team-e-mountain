@@ -103,8 +103,14 @@ fun CalibrationScreen(
     background: MountainBackground,
     headingOffsetDeg: Double,
     fovDeg: Double,
+    /**
+     * 合わせを抜けるときに必ず 1 回だけ呼ぶ。**途中で抜けても、そこまで測れたぶんを渡す。**
+     *
+     * 粗合わせ（15 秒）を終えたあとに山を選べないことは十分あるので、
+     * **そこで抜けたときに粗合わせの結果を捨ててはいけない** —— 捨てると
+     * オフセット 0 のまま稜線が出て、まるで違う方角の山が並ぶ。
+     */
     onCalibrated: (RidgeAlignment.Result) -> Unit,
-    onSkip: () -> Unit,
     onHome: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -127,7 +133,17 @@ fun CalibrationScreen(
     var offset by remember { mutableDoubleStateOf(headingOffsetDeg) }
     var fov by remember { mutableDoubleStateOf(fovDeg) }
     var fovMeasured by remember { mutableStateOf(false) }
-    var headingMeasured by remember { mutableStateOf(false) }
+    /** 粗合わせ（スマホの十字）が決まったか。**±5〜15° までしか詰まらない** */
+    var coarseDone by remember { mutableStateOf(false) }
+
+    /**
+     * 方位を**稜線合わせ**で取ったか（±1°）。
+     *
+     * 粗合わせと同じ旗にしてはいけない —— [RidgeAlignment.Result.headingMeasured] は
+     * 「稜線合わせで取った」の意味で使う側（稜線の画面）が読むので、
+     * 粗合わせで true にすると**粗いままなのに「合わせた」と表示される**。
+     */
+    var headingAligned by remember { mutableStateOf(false) }
 
     var gate by remember { mutableStateOf(CompassGate()) }
     var accuracyText by remember { mutableStateOf("") }
@@ -242,7 +258,7 @@ fun CalibrationScreen(
                 }
                 if (estimate.stable) {
                     offset = estimate.headingOffsetDeg
-                    headingMeasured = true
+                    coarseDone = true
                     feedback.done()
                     note = null
                     // 焼けていなければ [PickPanel] が待ち表示を出す。**ここで諦めない**
@@ -336,7 +352,7 @@ fun CalibrationScreen(
                     }
                 } else {
                     offset = RidgeAlignment.headingOffsetFrom(hold)
-                    headingMeasured = true
+                    headingAligned = true
                     centerPeak = peak
                     feedback.done()
                     note = null
@@ -419,19 +435,23 @@ fun CalibrationScreen(
                 )
             }
 
+            // **出口は 1 本。** 「合わせた」も「途中で抜ける」も同じところを通して、
+            // そこまで測れたぶんを必ず持ち出す（旗が実測かどうかを語る）
+            val leave = {
+                onCalibrated(
+                    RidgeAlignment.Result(
+                        headingOffsetDeg = offset,
+                        fovDeg = fov,
+                        headingMeasured = headingAligned,
+                        fovMeasured = fovMeasured,
+                        edgeRejected = false,
+                    ),
+                )
+            }
+
             if (step == Step.DONE) {
                 Button(
-                    onClick = {
-                        onCalibrated(
-                            RidgeAlignment.Result(
-                                headingOffsetDeg = offset,
-                                fovDeg = fov,
-                                headingMeasured = headingMeasured,
-                                fovMeasured = fovMeasured,
-                                edgeRejected = false,
-                            ),
-                        )
-                    },
+                    onClick = leave,
                     modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SaberaGreen,
@@ -441,8 +461,12 @@ fun CalibrationScreen(
             }
 
             Row {
-                TextButton(onClick = onSkip) {
-                    Text("合わせずに進む", color = Color.White.copy(alpha = 0.7f))
+                TextButton(onClick = leave) {
+                    Text(
+                        // 粗合わせだけでも済んでいれば、それは「合わせずに」ではない
+                        if (coarseDone) "ここまでで稜線を出す" else "合わせずに進む",
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
                 }
                 TextButton(onClick = onHome) { Text("ホーム", color = SaberaGreen) }
             }

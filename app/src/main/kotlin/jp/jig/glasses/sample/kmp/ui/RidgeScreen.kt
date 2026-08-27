@@ -99,6 +99,16 @@ fun RidgeScreen(
     background: MountainBackground,
     headingOffsetDeg: Double,
     fovDeg: Double,
+    /**
+     * 画角が**実測値か、星しるべ由来の仮値か**。
+     *
+     * 「合わせた」と「合わせたつもり」を画面で区別する。仮値のまま出した稜線は
+     * **画面の端ほど実景から外れる**（画角が違えば倍率が違う）ので、
+     * 重ならないのを不具合と取り違えないために出しておく。
+     */
+    fovMeasured: Boolean,
+    /** 方位オフセットを稜線合わせで取ったか。取っていなければ粗合わせ（±5〜15°）のまま */
+    headingMeasured: Boolean,
     onRecalibrate: () -> Unit,
     onRequestLeave: () -> Unit,
 ) {
@@ -359,7 +369,21 @@ fun RidgeScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Field("方位", "%.1f°".format(azimuthNow()))
                         Field("仰角", "%.1f°".format(pitch))
-                        Field("画角", "%.1f°".format(fovDeg))
+                        Field("画角", "%.1f°".format(fovDeg) + if (fovMeasured) "" else "*")
+                    }
+                    // **仮値のまま出していることを画面に残す。** 消すと、次に見た人が
+                    // 実測値だと思い込む（AGENTS.md「確かめていないことを『動く』と書かない」）
+                    if (!fovMeasured || !headingMeasured) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = buildString {
+                                if (!headingMeasured) append("方位は粗合わせのまま（±5〜15°）")
+                                if (!headingMeasured && !fovMeasured) append(" / ")
+                                if (!fovMeasured) append("画角* は未実測の仮値 ${"%.0f".format(fovDeg)}°")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SaberaWarning,
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
