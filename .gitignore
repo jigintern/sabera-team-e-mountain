@@ -1,0 +1,16 @@
+# Gradle / Android
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+
+# 生成キャッシュ（同梱 DEM 本体 data/dem/ は **コミットする**）
+tools/.cache/
+
+# macOS
+.DS_Store
+
+# 秘密情報
+.env
