@@ -19,6 +19,21 @@ object Raycaster {
      */
     const val MAX_DISTANCE_M = 150_000.0
 
+    /**
+     * 稜線として信じる下限の距離[m]。
+     *
+     * **これより近い地面は稜線ではない。** z10 の 1 画素は 124m なので、500m 先では
+     * 1 画素が方位 14° ぶんを占める。0.1° 刻みのレイ 140 本が同じ画素を読み、
+     * 実地形に無い水平な直線が出る。1km なら 1 画素は 7°、2km なら 3.5° まで下がる。
+     *
+     * **加えて、ここが「観測者が地面に埋まっている」事故の被害を抑える。**
+     * 観測者の標高を GPS から取ると ±20m ずれる。100m 先の地面が 20m 高いと 11° の壁になり、
+     * 稜線がまるごと壊れる（実測: 観測者 0m で白山が 11.31° に出た）。
+     * 観測地の標高は [jp.jig.glasses.sample.kmp.terrain.ElevationSource] から取るのが正だが、
+     * 取り違えても致命傷にならないようにしておく。
+     */
+    const val MIN_DISTANCE_M = 1_000.0
+
     /** 方位の刻み[度]。360 / 0.1 = 3,600 本。グラスの 1 画素は 0.066° なので、ほぼ画素刻み */
     const val STEP_DEG = 0.1
 
@@ -59,7 +74,7 @@ object Raycaster {
             var best = NO_DATA_ALTITUDE_DEG
             var bestD = 0.0
             var bestH = 0.0
-            var d = sampleStepM(0.0)
+            var d = MIN_DISTANCE_M
             while (d <= maxDistanceM) {
                 Geodesy.destinationInto(from.latDeg, from.lonDeg, az, d, point)
                 val h = elevation.elevationM(point[0], point[1])

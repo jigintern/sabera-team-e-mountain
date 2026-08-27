@@ -48,7 +48,7 @@ object PeakVisibility {
         val limit = distance - SUMMIT_MARGIN_M
         val point = DoubleArray(2)
 
-        var d = Raycaster.sampleStepM(0.0)
+        var d = Raycaster.MIN_DISTANCE_M
         while (d < limit) {
             Geodesy.destinationInto(from.latDeg, from.lonDeg, azimuth, d, point)
             val h = elevation.elevationM(point[0], point[1])
