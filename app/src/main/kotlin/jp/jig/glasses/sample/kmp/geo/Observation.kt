@@ -1,5 +1,14 @@
 package jp.jig.glasses.sample.kmp.geo
 
+/**
+ * いま見ている向き。**稜線を出している間は「頭の向き＝見ている方角」。**
+ *
+ * 方位は真北 0°・東回り、仰角は水平 0°。ヨーそのものではない
+ * （ヨーは逆に回り、しかも流れる —— [azimuthFromYaw] と
+ * [jp.jig.glasses.sample.kmp.alignment.YawDriftCorrector] を通した値がこれ）。
+ */
+data class Look(val azDeg: Double, val altDeg: Double)
+
 /** 観測の既定値。**測れなかったときの落とし先。** */
 object ObservationDefaults {
 
