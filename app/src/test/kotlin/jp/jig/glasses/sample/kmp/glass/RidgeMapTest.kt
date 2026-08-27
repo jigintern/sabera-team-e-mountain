@@ -71,6 +71,51 @@ class RidgeMapTest {
         }
     }
 
+    /**
+     * **グラスに出る 1 画面ぶんを目で見るために書き出す。**
+     *
+     * 文字そのものはファームが描くのでここでは出せない。代わりに**枠の矩形と山頂の印**を
+     * 描く。見たいのは「名前が稜線のどこに乗るか」「枠どうしがぶつかっていないか」で、
+     * どちらも矩形で分かる。
+     */
+    private fun savePanelPreview(map: RidgeMap, name: String) {
+        val panel = ByteArray(PANEL_WIDTH * PANEL_HEIGHT)
+        val offsetX = (PANEL_WIDTH - map.width) / 2
+        val offsetY = (PANEL_HEIGHT - map.height) / 2
+        for (y in 0 until map.height) {
+            for (x in 0 until map.width) {
+                panel.plot(PANEL_WIDTH, PANEL_HEIGHT, offsetX + x, offsetY + y, map.gray[y * map.width + x].toInt() and 0xFF)
+            }
+        }
+        for (element in map.labels.toCanvasElements(map.width, map.height)) {
+            val x0 = element.x
+            val y0 = element.y
+            val x1 = element.x + element.width - 1
+            val y1 = element.y + element.height - 1
+            panel.line(PANEL_WIDTH, PANEL_HEIGHT, x0, y0, x1, y0, Ink.CARDINAL)
+            panel.line(PANEL_WIDTH, PANEL_HEIGHT, x0, y1, x1, y1, Ink.CARDINAL)
+            panel.line(PANEL_WIDTH, PANEL_HEIGHT, x0, y0, x0, y1, Ink.CARDINAL)
+            panel.line(PANEL_WIDTH, PANEL_HEIGHT, x1, y0, x1, y1, Ink.CARDINAL)
+        }
+        for (peak in map.shownPeaks) {
+            // 山頂そのものに縦の印。ラベルの下辺との隙間が目で見える
+            val x = offsetX + peak.x
+            val y = offsetY + peak.y + PeakLabels.LABEL_OFFSET_PX
+            panel.line(PANEL_WIDTH, PANEL_HEIGHT, x, y - 8, x, y + 8, Ink.RIDGE_LINE)
+        }
+        val file = GlassPng.save(panel, PANEL_WIDTH, PANEL_HEIGHT, "build/ridge", name)
+        println("プレビュー: ${file.absolutePath}")
+        println("  枠: " + map.shownPeaks.joinToString { "${it.label}@(${it.x},${it.y})" })
+    }
+
+    @Test
+    fun `グラス 1 画面ぶんのプレビューを書き出す`() {
+        val (profile, panorama, _) = baked
+        savePanelPreview(RidgeMap.bake(profile, panorama, 65.77, 2.40), "panel-hakusan")
+        savePanelPreview(RidgeMap.bake(profile, panorama, 167.5, 3.5), "panel-hinosan")
+        savePanelPreview(RidgeMap.bake(profile, panorama, 90.0, 2.0), "panel-east")
+    }
+
     @Test
     fun `名前は稜線の線に重ならない`() {
         val (profile, panorama, _) = baked
