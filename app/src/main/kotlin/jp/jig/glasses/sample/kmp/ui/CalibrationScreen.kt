@@ -64,6 +64,7 @@ import jp.jig.glasses.sample.kmp.glass.ROLL_SMOOTHING
 import jp.jig.glasses.sample.kmp.glass.RidgeMap
 import jp.jig.glasses.sample.kmp.glass.clearedCanvasText
 import jp.jig.glasses.sample.kmp.glass.sightMark
+import jp.jig.glasses.sample.kmp.terrain.PeakPanorama
 import jp.jig.glasses.sample.kmp.terrain.RidgeSession
 import jp.jig.glasses.sample.kmp.terrain.SightedPeak
 import jp.jig.glasses.sample.kmp.ui.component.KeepScreenOn
@@ -377,12 +378,18 @@ fun CalibrationScreen(
 
                 Step.PICK_CENTER, Step.PICK_EDGE -> {
                     val edge = step == Step.PICK_EDGE
-                    val peaks = session.panorama?.peaks.orEmpty()
-                        .filter { !edge || it.label != centerPeak?.label }
+                    // **2 座目は「別の山」でなくてよい。** 画角は峰 1 座と印の位置だけで決まる
+                    // （[RidgeAlignment.fovDegFrom] は 1 座しか見ない）。首を振って同じ山を
+                    // 印へ寄せれば測れるので、**同じ山を先頭に出して勧める** ——
+                    // 鯖江で見える山は 10 座、白山の近くには七倉山（方位差 2.1°）と
+                    // 白山釈迦岳（1.1°）しかなく、**別の山を強いると取り違える**。
+                    // 取り違えたまま出た画角は範囲内に収まるので捨てられない
                     PickPanel(
                         baking = baking,
                         edge = edge,
-                        peaks = peaks,
+                        peaks = session.panorama?.peaks.orEmpty(),
+                        confusable = session.panorama?.confusable.orEmpty(),
+                        recommended = if (edge) centerPeak else null,
                         onPick = {
                             target = it
                             step = if (edge) Step.HOLD_EDGE else Step.HOLD_CENTER
@@ -508,6 +515,15 @@ private fun PickPanel(
     baking: Boolean,
     edge: Boolean,
     peaks: List<SightedPeak>,
+    /**
+     * **方位が 2° 以内に別の山があって取り違える山**（[PeakPanorama.confusable]）。
+     *
+     * 選べないようにはしない —— 実物が見えているかは使う人しか知らないので、
+     * **警告して判断を渡す**。鯖江の白山は隣に白山釈迦岳（1.06°）が居るのでここに入る。
+     */
+    confusable: Set<SightedPeak> = emptySet(),
+    /** 先頭に出して勧める山。2 座目では**1 座目と同じ山**（取り違えないので確実） */
+    recommended: SightedPeak? = null,
     onPick: (SightedPeak) -> Unit,
 ) {
     Panel {
@@ -520,14 +536,15 @@ private fun PickPanel(
             return@Panel
         }
         Text(
-            if (edge) "もう 1 つ、別の山を選んでください" else "実物が見えている山を 1 つ選んでください",
+            if (edge) "印に入れる山を選んでください" else "実物が見えている山を 1 つ選んでください",
             color = Color.White,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(4.dp))
         Text(
             if (edge) {
-                "画角を測ります。中央からなるべく離れた山のほうがよく効きます"
+                recommended?.let { "画角を測ります。${it.label}のままで大丈夫です（首を振って印に入れます）" }
+                    ?: "画角を測ります。首を振って、その山を印に入れます"
             } else {
                 "百名山を上に出しています。名前と形が分かる山ほど正確に合います"
             },
@@ -540,7 +557,16 @@ private fun PickPanel(
             modifier = Modifier.fillMaxWidth().height(220.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(peaks.sortedByDescending { it.isFamous }) { peak ->
+            items(
+                peaks.sortedWith(
+                    // 勧める山（2 座目なら 1 座目と同じ山）→ 百名山 → 残り
+                    compareByDescending<SightedPeak> { it.label == recommended?.label }
+                        // **取り違える山は下げる。** 上に出すと、いちばん有名な山
+                        // （鯖江なら白山）を勧めてしまい、隣の峰で合わせた較正が残る
+                        .thenBy { it in confusable }
+                        .thenByDescending { it.isFamous },
+                ),
+            ) { peak ->
                 OutlinedButton(onClick = { onPick(peak) }, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth()) {
                         Text(
@@ -554,6 +580,13 @@ private fun PickPanel(
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.6f),
                         )
+                        if (peak in confusable) {
+                            Text(
+                                "すぐ隣に似た山があります（取り違えると合いません）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SaberaWarning,
+                            )
+                        }
                     }
                 }
             }

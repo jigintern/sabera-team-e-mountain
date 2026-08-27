@@ -152,4 +152,60 @@ class RidgeAlignmentTest {
         // 5° ずれたオフセットなら残差も 5°
         assertEquals(5.0, RidgeAlignment.residualDeg(hold, offset + 5.0), 1e-9)
     }
+
+    /**
+     * **同じ山を 2 回使っても画角が出る。**
+     *
+     * [RidgeAlignment.fovDegFrom] は峰 1 座と印の位置しか見ないので、2 座目は要らない。
+     * 首を振って**同じ山を印へ寄せる**のが、いちばん取り違えない測り方
+     * ——鯖江で見える山は 10 座、白山の隣は七倉山（方位差 2.1°）と
+     * 白山釈迦岳（1.1°）しかなく、**別の山を強いると取り違える**。
+     * 取り違えて出た画角は [RidgeAlignment.MIN_FOV_DEG]〜[RidgeAlignment.MAX_FOV_DEG] に
+     * 収まってしまうので捨てられない。
+     */
+    @Test
+    fun `同じ山を首を振って印に入れても画角が復元できる`() {
+        val trueFov = 28.5
+        val peakAz = 65.77 // 白山
+        val peakAlt = 2.43
+        val centerYaw = -20.0
+        val offset = headingOffsetFor(peakAz, centerYaw)
+        val markX = RIDGE_WIDTH * RidgeAlignment.EDGE_MARK_RATIO
+
+        // 首を振って、同じ白山が印に来るヨーを探す（使う人が実際にやること）
+        var yaw = centerYaw
+        var found: Double? = null
+        while (yaw < centerYaw + 30.0) {
+            if (screenXOf(peakAz, peakAlt, yaw, 2.0, offset, trueFov) >= markX) {
+                found = yaw
+                break
+            }
+            yaw += 0.01
+        }
+        val edgeYaw = requireNotNull(found) { "首を 30° 振っても白山が印まで来ない" }
+        // ヨーは方位と逆に回るので、印（右）へ寄せるにはヨーが増える
+        assertTrue("首を振っていない", edgeYaw > centerYaw)
+
+        val hold = RidgeAlignment.Hold(
+            peakAzimuthDeg = peakAz, peakAltitudeDeg = peakAlt,
+            yawDeg = edgeYaw, pitchDeg = 2.0,
+            markX = screenXOf(peakAz, peakAlt, edgeYaw, 2.0, offset, trueFov),
+        )
+        assertEquals(
+            "同じ山では画角が出ない",
+            trueFov, RidgeAlignment.fovDegFrom(hold, offset, RIDGE_WIDTH, RIDGE_HEIGHT)!!, 1e-6,
+        )
+    }
+
+    /** 首をどれだけ振れば印に届くか。**実機で「振りすぎ」と感じたら印を中心寄りにする** */
+    @Test
+    fun `印まで首を振る量は画角の 4 分の 1 ほど`() {
+        for (fov in listOf(25.0, 35.0, 45.0)) {
+            val k = projectionScale(RIDGE_WIDTH, fov)
+            val markOffset = RIDGE_WIDTH * RidgeAlignment.EDGE_MARK_RATIO - RIDGE_WIDTH / 2.0
+            val turnDeg = 2.0 * Math.toDegrees(Math.atan(markOffset / k / 2.0))
+            println("画角 $fov° → 印まで首を ${"%.2f".format(turnDeg)}° 振る")
+            assertTrue("振る量が画角に対して極端（$turnDeg°）", turnDeg in fov * 0.15..fov * 0.35)
+        }
+    }
 }
