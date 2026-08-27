@@ -1,183 +1,357 @@
 package jp.jig.glasses.sample.kmp.ui
 
-import android.app.Activity
-import androidx.compose.foundation.layout.Arrangement
+import android.os.SystemClock
+import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import app.jigglass.glass.CommandManager
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import app.jigglass.glass.GlassClient
 import app.jigglass.glass.GlassManager
 import jp.jig.glasses.sample.kmp.geo.ObservationDefaults
 import jp.jig.glasses.sample.kmp.glass.BundledData
-import jp.jig.glasses.sample.kmp.glass.PANEL_HEIGHT
-import jp.jig.glasses.sample.kmp.glass.PANEL_WIDTH
-import jp.jig.glasses.sample.kmp.glass.RIDGE_IMAGE_ID
-import jp.jig.glasses.sample.kmp.glass.RidgeMap
-import jp.jig.glasses.sample.kmp.glass.batched
-import jp.jig.glasses.sample.kmp.glass.clearedCanvasText
-import jp.jig.glasses.sample.kmp.glass.compressedSizeBytes
-import jp.jig.glasses.sample.kmp.glass.toCanvasElements
 import jp.jig.glasses.sample.kmp.terrain.RidgeSession
+import jp.jig.glasses.sample.kmp.ui.component.MountainBackground
+import jp.jig.glasses.sample.kmp.ui.component.SaberaGreen
+import jp.jig.glasses.sample.kmp.ui.component.SaberaOnAccent
+import jp.jig.glasses.sample.kmp.ui.component.SaberaSurface
+import jp.jig.glasses.sample.kmp.ui.component.SaberaWarning
+import jp.jig.glasses.sample.kmp.ui.component.rememberMountainBackground
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 /**
- * 段階4〜5の画面。**同梱の地形から本物の稜線と山名を焼いてグラスへ出す。**
+ * ホームから始めて、接続確認 → 方位合わせ → 稜線と進む。
  *
- * 方位はスライダーで動かす。段階6でヨーとつなぐまでの仮の入口だが、
- * **実機で「向けた方角の稜線と、そこに立っている山の名前が出る」ことはこれで確かめられる**。
+ * **星しるべ `GlassesApp` の骨格をそのまま持ってきている**（画面の持ち方・戻るキーの扱い・
+ * 瞬断の見張り・切断の一本化）。台本・BGM・通知は峰ミルに無いので落としてある。
  */
 @Composable
 fun MinemiruApp(manager: GlassManager) {
     val context = LocalContext.current
-    val activity = context as? Activity
-    val client by manager.connectedDevice.collectAsState(initial = null)
-    val commands = remember(client) { client?.createCommandManager() }
-    val scope = rememberCoroutineScope()
+    var screen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
+    val background = rememberMountainBackground()
 
-    // **山名は地平線と同じ焼き直しに乗せる。** 別々に焼くと新しい稜線に古い名前が乗る
-    val session = remember { RidgeSession(BundledData.elevation(context), BundledData.peaks(context)) }
-    // グラスに今出ている文字。**消え残りを消すために覚えておく**（前より短い名前で
-    // 上書きすると、前の名前の末尾が画面に残る）
-    var shownElements by remember { mutableStateOf(emptyList<CommandManager.CanvasElement>()) }
-    var azimuth by remember { mutableFloatStateOf(65.77f) }
-    var altitude by remember { mutableFloatStateOf(2.0f) }
-    var baking by remember { mutableStateOf(true) }
-    var status by remember { mutableStateOf("地平線を焼いています…") }
+    /**
+     * 焼いた地平線。**画面ではなくアプリが持つ。**
+     *
+     * 焼くのに実機で 2.8 秒かかるので、方位合わせと稜線の画面がそれぞれ焼くと
+     * **合わせ終わった直後にもう一度 2.8 秒待たされる**。同梱データも
+     * プロセスで一度だけ読む（[BundledData]）。
+     */
+    val session = remember {
+        RidgeSession(BundledData.elevation(context), BundledData.peaks(context))
+    }
 
-    // **位置が確定したときに 1 回だけ焼く。** 首の動きでは焼き直さない
+    /** 方位合わせの結果。**画面をまたいで持ち回る**（稜線の画面が毎回作り直すものではない） */
+    var headingOffset by rememberSaveable { mutableDoubleStateOf(0.0) }
+
+    /**
+     * 画角。**既定は星しるべ由来の未実測の仮値**で、稜線合わせで実測値に置き換わる。
+     * 実測できたかどうかも持つ —— 「合わせた」と「合わせたつもり」は画面で区別する。
+     */
+    var fovDeg by rememberSaveable { mutableDoubleStateOf(ObservationDefaults.FOV_DEG) }
+    var fovMeasured by rememberSaveable { mutableStateOf(false) }
+
+    val connectedClient by manager.connectedDevice.collectAsState(initial = null)
+    var observingClient by remember { mutableStateOf<GlassClient?>(null) }
+    var connectionLost by rememberSaveable { mutableStateOf(false) }
+    var confirmLeaving by rememberSaveable { mutableStateOf(false) }
+    var pendingDisconnect by remember { mutableStateOf<GlassClient?>(null) }
+
+    /** ホームのひとこと。**同梱カタログから作る**ので圏外でも出る */
+    var tip by remember { mutableStateOf<MountainTip?>(null) }
     LaunchedEffect(Unit) {
-        val started = System.nanoTime()
-        // **失敗しても baking を戻す。** 例外で LaunchedEffect が死ぬと
-        // ボタンが永久にグレーアウトし、画面には理由が何も出ない
-        val error = runCatching {
-            withContext(Dispatchers.Default) {
-                session.bake(ObservationDefaults.DEFAULT_LAT_DEG, ObservationDefaults.DEFAULT_LON_DEG)
-            }
-        }.exceptionOrNull()
-        val ms = (System.nanoTime() - started) / 1_000_000
-        baking = false
-        status = if (error != null) {
-            "地平線を焼けませんでした（${ms}ms）: ${error.message}"
-        } else {
-            val at = session.bakedAt!!
-            val panorama = session.panorama!!
-            "地平線を焼きました（${ms}ms・観測地の標高 ${"%.1f".format(at.elevationM)}m・" +
-                "見える山 ${panorama.peaks.size} 座うち百名山 ${panorama.famous.size} 座）"
+        tip = withContext(Dispatchers.Default) {
+            runCatching {
+                val famous = BundledData.peaks(context).famous
+                val peak = famous[Random.nextInt(famous.size)]
+                MountainTip(
+                    header = "日本百名山 ${famous.size} 座を収録",
+                    text = "${peak.label}（${peak.elevationM}m・${peak.pref}）" +
+                        " —— 150km 以内にあって、手前の山に隠れていなければ名前が出ます",
+                )
+            }.getOrNull()
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("峰ミル", style = MaterialTheme.typography.headlineMedium)
-        Text(if (commands == null) "グラス未接続" else "グラス接続済み", style = MaterialTheme.typography.bodyLarge)
-        Text(status, style = MaterialTheme.typography.bodySmall)
+    /**
+     * 切断待ちの相手。**ホームへ移してから切る。**
+     *
+     * 稜線を出したまま切ると、観測中だけ動いている見張り（[ConnectionWatch]）が
+     * 「接続が切れました」を誤爆する。
+     */
+    LaunchedEffect(pendingDisconnect) {
+        val target = pendingDisconnect ?: return@LaunchedEffect
+        withContext(Dispatchers.IO) { runCatching { manager.disconnect(target) } }
+            .onFailure { Log.w(TAG, "SABERA の切断に失敗した", it) }
+        observingClient = null
+        pendingDisconnect = null
+    }
 
-        // **ここが無いとグラスに一度もつながらない。** applicationId を星しるべと分けたので、
-        // BLE の紐付け（CompanionDeviceManager の association）は引き継がれない。
-        // connectToLastDevice は「前に選んだ端末」がある前提なので、初回は自分で選ばせる
-        if (commands == null) {
-            Button(
-                onClick = {
-                    val a = activity ?: return@Button
-                    scope.launch {
-                        status = "グラスを探しています…"
-                        runCatching { manager.showAutomaticSelectionDialog(a) }
-                            .onFailure { status = "探せませんでした: ${it.message}" }
-                    }
+    // connectedDevice は切断直後に null になるので、猶予の間も見られるよう最後の client を控える
+    LaunchedEffect(connectedClient) {
+        if (connectedClient != null) observingClient = connectedClient
+    }
+
+    // 瞬断で観測画面を追い出さない。**BLE は屋外でよく途切れる**
+    LaunchedEffect(screen, observingClient) {
+        if (screen != AppScreen.CALIBRATION && screen != AppScreen.RIDGE) {
+            connectionLost = false
+            return@LaunchedEffect
+        }
+        val client = observingClient ?: return@LaunchedEffect
+        val watch = ConnectionWatch()
+        while (true) {
+            val alive = manager.connectedDevice.value != null && client.connected.value
+            if (watch.sample(alive, SystemClock.elapsedRealtime())) connectionLost = true
+            delay(CONNECTION_CHECK_INTERVAL_MS)
+        }
+    }
+
+    /**
+     * 戻るキー。**既定のままだと戻るキーでアプリが終わる。**
+     * 稜線の画面でそれをやると方位合わせからやり直しなので、確認を挟む。
+     */
+    BackHandler(enabled = screen != AppScreen.HOME) {
+        when (val back = backDestination(screen)) {
+            null -> if (screen == AppScreen.RIDGE) confirmLeaving = true
+            else -> screen = back
+        }
+    }
+
+    when (screen) {
+        AppScreen.HOME -> HomeScreen(
+            background = background,
+            tip = tip,
+            onStart = { screen = AppScreen.CONNECTION },
+        )
+
+        AppScreen.CONNECTION -> ConnectionCheckScreen(
+            manager = manager,
+            client = connectedClient,
+            background = background,
+            onContinue = { screen = AppScreen.CALIBRATION },
+            onHome = { screen = AppScreen.HOME },
+            // **画面は変えない。** 切れるとカードがそのまま未接続の表示へ変わり、選び直せる
+            onDisconnect = { pendingDisconnect = connectedClient ?: observingClient },
+        )
+
+        AppScreen.CALIBRATION -> WithClient(
+            client = observingClient,
+            manager = manager,
+            background = background,
+            onHome = { screen = AppScreen.HOME },
+            onRetry = { screen = AppScreen.CALIBRATION },
+        ) { client ->
+            CalibrationScreen(
+                client = client,
+                session = session,
+                background = background,
+                headingOffsetDeg = headingOffset,
+                fovDeg = fovDeg,
+                onCalibrated = { result ->
+                    headingOffset = result.headingOffsetDeg
+                    fovDeg = result.fovDeg
+                    if (result.fovMeasured) fovMeasured = true
+                    screen = AppScreen.RIDGE
                 },
-            ) { Text("グラスを探す") }
+                onSkip = { screen = AppScreen.RIDGE },
+                onHome = { screen = AppScreen.HOME },
+            )
         }
 
-        Text("方位 ${"%.1f".format(azimuth)}°（65.8° が白山・167.5° が日野山）")
-        Slider(
-            value = azimuth,
-            onValueChange = { azimuth = it },
-            valueRange = 0f..360f,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text("仰角 ${"%.1f".format(altitude)}°")
-        Slider(
-            value = altitude,
-            onValueChange = { altitude = it },
-            valueRange = -10f..30f,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        AppScreen.RIDGE -> WithClient(
+            client = observingClient,
+            manager = manager,
+            background = background,
+            onHome = { screen = AppScreen.HOME },
+            onRetry = { screen = AppScreen.CALIBRATION },
+        ) { client ->
+            RidgeScreen(
+                client = client,
+                session = session,
+                background = background,
+                headingOffsetDeg = headingOffset,
+                fovDeg = fovDeg,
+                onRecalibrate = { screen = AppScreen.CALIBRATION },
+                // ボタンは**確認を出すだけ**。切断は戻るキーと同じ出口に合流させる
+                onRequestLeave = { confirmLeaving = true },
+            )
+        }
+    }
 
-        Button(
-            enabled = commands != null && !baking,
-            onClick = {
-                val cm = commands ?: return@Button
-                val profile = session.profile ?: return@Button
-                val panorama = session.panorama ?: return@Button
-                scope.launch {
-                    // **絵と名前は 1 回の bake から取る。** 別々に呼ぶと向きがずれ得る
-                    val map = withContext(Dispatchers.Default) {
-                        RidgeMap.bake(profile, panorama, azimuth.toDouble(), altitude.toDouble())
-                    }
-                    // **送る前に自分で数える。** 溢れると SDK が黙って弾き、前の絵が残る
-                    if (!map.fitsBuffer) {
-                        status = "バッファ超過 ${map.bufferUsageBytes} バイト。送らない"
-                        return@launch
-                    }
-                    val names = map.shownPeaks.joinToString("・") { it.label }.ifEmpty { "なし" }
-                    status = "送っています… ${map.bufferUsageBytes} バイト（圧縮後 ${compressedSizeBytes(map.gray)}）"
-                    runCatching {
-                        // **画像を先に積み、山名はその後ろに続ける。** 逆にすると、
-                        // 転送中に名前だけが浮いて見える（星しるべの実機で確認済み）
-                        cm.sendCanvasImage(
-                            id = RIDGE_IMAGE_ID,
-                            x = (PANEL_WIDTH - map.width) / 2,
-                            y = (PANEL_HEIGHT - map.height) / 2,
-                            width = map.width,
-                            height = map.height,
-                            grayscale = map.gray,
-                        )
-                        val elements = map.labels.toCanvasElements(map.width, map.height)
-                        for (batch in elements.batched(shownElements)) cm.sendCanvasElements(batch)
-                        shownElements = elements
-                    }.onSuccess { status = "稜線と山名を送りました（${map.bufferUsageBytes} バイト）: $names" }
-                        .onFailure { status = "失敗: ${it.message}" }
-                }
+    if (connectionLost) {
+        ConnectionLostDialog(
+            onConnectionCheck = {
+                connectionLost = false
+                observingClient = null
+                screen = AppScreen.CONNECTION
             },
-        ) { Text(if (baking) "焼いています…" else "この方角の稜線を送る") }
+        )
+    }
 
-        Button(
-            enabled = commands != null,
-            onClick = {
-                val cm = commands ?: return@Button
-                scope.launch {
-                    runCatching {
-                        cm.removeCanvasImage(RIDGE_IMAGE_ID)
-                        // **文字は画像と別に残る。** 消さないと次の絵に前の山名が重なって出る
-                        cm.sendCanvasElements(clearedCanvasText())
-                    }
-                    shownElements = emptyList()
-                    status = "消しました"
-                }
+    // 切断のダイアログが出ているなら、そちらが先。重ねて出さない
+    if (confirmLeaving && !connectionLost) {
+        LeaveDialog(
+            onLeave = {
+                confirmLeaving = false
+                // 生きているほうを先に採る。disconnect の突き合わせは**参照等価**なので、
+                // 控えのほうを渡すと connectedDevice が null にならない
+                pendingDisconnect = connectedClient ?: observingClient
+                screen = AppScreen.HOME
             },
-        ) { Text("消す") }
+            onStay = { confirmLeaving = false },
+        )
     }
 }
+
+/**
+ * つながっている前提の画面を、**つながっていないときは接続確認に差し替える**。
+ *
+ * 星しるべが同じことを画面ごとに書いていた（3 か所）ので、こちらは 1 か所にまとめる。
+ */
+@Composable
+private fun WithClient(
+    client: GlassClient?,
+    manager: GlassManager,
+    background: MountainBackground,
+    onHome: () -> Unit,
+    onRetry: () -> Unit,
+    content: @Composable (GlassClient) -> Unit,
+) {
+    if (client == null) {
+        ConnectionCheckScreen(
+            manager = manager,
+            client = null,
+            background = background,
+            onContinue = onRetry,
+            onHome = onHome,
+            // 未接続の代替表示なので、つなぎ直す口はそもそも出ない
+            onDisconnect = {},
+        )
+    } else {
+        content(client)
+    }
+}
+
+/**
+ * やめるかの確認。**稜線から出る唯一の出口**（戻るキーもボタンもここへ集まる）。
+ *
+ * **やめると SABERA との接続まで切れる。** CDM の登録が消えるので、もう一度始めるには
+ * 端末を選び直して方位合わせからやり直しになる。**代償は本文とボタンの側に書く** —
+ * 見出しを「切断」にすると、やめたいだけの人の意図から遠くなる。
+ */
+@Composable
+private fun LeaveDialog(onLeave: () -> Unit, onStay: () -> Unit) {
+    Dialog(onDismissRequest = onStay) {
+        Card(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp),
+            colors = CardDefaults.cardColors(containerColor = SaberaSurface),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "山を見るのをやめますか",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "SABERA との接続を切ってホームへ戻ります。" +
+                        "次に始めるときは、SABERA を選び直して方位合わせからやり直しです",
+                    color = Color.White.copy(alpha = 0.68f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onStay,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SaberaGreen,
+                        contentColor = SaberaOnAccent,
+                    ),
+                ) { Text("続ける") }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onLeave, modifier = Modifier.fillMaxWidth()) {
+                    Text("切断してホームへ", color = SaberaWarning)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionLostDialog(onConnectionCheck: () -> Unit) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp),
+            colors = CardDefaults.cardColors(containerColor = SaberaSurface),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "SABERA との接続が切れました",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = SaberaWarning,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "SABERA の電源と Bluetooth を確認してください",
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onConnectionCheck,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SaberaGreen,
+                        contentColor = SaberaOnAccent,
+                    ),
+                ) { Text("接続確認へ") }
+            }
+        }
+    }
+}
+
+private const val TAG = "MinemiruApp"
+private const val CONNECTION_CHECK_INTERVAL_MS = 1_000L

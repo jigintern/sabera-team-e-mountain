@@ -1,6 +1,7 @@
 package jp.jig.glasses.sample.kmp.glass
 
 import java.io.File
+import jp.jig.glasses.sample.kmp.alignment.RidgeAlignment
 import jp.jig.glasses.sample.kmp.catalog.PeakCatalog
 import jp.jig.glasses.sample.kmp.geo.Viewpoint
 import jp.jig.glasses.sample.kmp.terrain.PeakPanorama
@@ -114,6 +115,24 @@ class RidgeMapTest {
         savePanelPreview(RidgeMap.bake(profile, panorama, 65.77, 2.40), "panel-hakusan")
         savePanelPreview(RidgeMap.bake(profile, panorama, 167.5, 3.5), "panel-hinosan")
         savePanelPreview(RidgeMap.bake(profile, panorama, 90.0, 2.0), "panel-east")
+    }
+
+    @Test
+    fun `方位合わせの印を焼いた1枚を書き出す`() {
+        val (profile, panorama, _) = baked
+        // 稜線合わせで実際にグラスへ出る絵。**印の隙間に山頂を入れてもらう**
+        val center = RidgeMap.bake(profile, panorama, 65.77, 2.40)
+        center.gray.sightMark(center.width, center.height, center.width / 2)
+        savePanelPreview(center, "align-center")
+
+        val edge = RidgeMap.bake(profile, panorama, 65.77, 2.40)
+        val markX = (edge.width * RidgeAlignment.EDGE_MARK_RATIO).toInt()
+        edge.gray.sightMark(edge.width, edge.height, markX)
+        savePanelPreview(edge, "align-edge")
+
+        // 印は最上段だけで描く。中間階調は屋外の空に負ける
+        val levels = center.gray.map { (it.toInt() and 0xFF) ushr 5 }.toSet()
+        assertEquals(setOf(0, 7), levels)
     }
 
     @Test
