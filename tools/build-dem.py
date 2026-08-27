@@ -98,7 +98,11 @@ def main() -> None:
         for key in index["tiles"]:
             x, y = (int(v) for v in key.split("/"))
             values = decode((OUT / str(ZOOM) / str(x) / f"{y}.bin").read_bytes())
-            if len(values) != TILE * TILE or max(values) > 4000 or min(values) < -100:
+            # 下限 -200m は実データに合わせた値。10/914/385（八戸付近の海岸）に
+            # 元データが -121.85m を持っている。**これは配信元がそう持っている値**で、
+            # 符号化の不具合ではない（元 PNG と突き合わせて確認済み）。
+            # 稜線用途では低い値は「隠さない」側に倒れるので実害は無い。
+            if len(values) != TILE * TILE or max(values) > 4000 or min(values) < -200:
                 print(f"  ✗ {key}: 件数 {len(values)} 範囲 {min(values)}〜{max(values)}")
                 bad += 1
         print(f"検証: {len(index['tiles'])} 枚 / 異常 {bad} 枚")
