@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import jp.jig.glasses.sample.kmp.catalog.Attribution
 import jp.jig.glasses.sample.kmp.ui.component.ACTION_BUTTON_MAX_WIDTH
 import jp.jig.glasses.sample.kmp.ui.component.MountainBackdrop
 import jp.jig.glasses.sample.kmp.ui.component.MountainBackground
@@ -102,6 +103,16 @@ fun HomeScreen(
                 text = "全国の地形を同梱しています。圏外でも動きます",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+
+            // **出典はアプリの中に出す義務がある。** 同梱している山名も標高も国土地理院の
+            // コンテンツで、規約が出典の明示（標高タイルは加工した旨まで）を求めている。
+            // 文言は [Attribution] 1 か所から取る —— 2 か所に書くと必ず片方が古くなる
+            Text(
+                text = Attribution.ONE_LINE,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.45f),
                 textAlign = TextAlign.Center,
             )
         }

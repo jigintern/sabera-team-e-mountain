@@ -1,0 +1,60 @@
+峰ミル（Minemiru）
+
+このリポジトリには、国土地理院のコンテンツから作った同梱データが含まれます。
+
+
+■ data/peaks.json
+
+  出典: 国土地理院「日本の主な山岳標高」
+        https://www.gsi.go.jp/kihonjohochousa/kihonjohochousa41139.html
+
+  加工: 出典の一覧（1003 山）から、山名・よみ・標高・緯度経度・都道府県を取り出し、
+        JSON へ変換しています。標高と位置の値そのものは変えていません。
+        日本百名山（100 座）には深田久弥の呼び名を対応づけています。
+        作り方は tools/build-peak-catalog.py にあります。
+
+
+■ data/dem/
+
+  出典: 国土地理院「地理院タイル（標高タイル）」
+        https://maps.gsi.go.jp/development/ichiran.html
+        https://maps.gsi.go.jp/development/demtile.html
+
+  加工: **加工しています。** ズーム 10 の標高タイル（全国 707 枚）について、
+        配信形式のテキスト／PNG から標高値を取り出し、
+
+          - 4m 刻みへ量子化
+          - int16 へ丸め（無効値は -32768）
+          - 行ごとの差分を取って zlib で圧縮
+
+        した独自形式（MDM1）へ変換しています。**元の分解能は保持していません。**
+        したがってこのデータは測量・航行・防災の用途には使えません。
+        作り方は tools/build-dem.py と tools/gsi_dem.py にあります。
+
+
+  いずれも国土地理院コンテンツ利用規約に基づいて利用しています。
+  https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html
+
+  出典の表示はアプリ内（ホーム画面）にも出しています。
+  文言の出どころは app/src/main/kotlin/jp/jig/glasses/sample/kmp/catalog/Attribution.kt です。
+
+
+■ 星しるべ から借りているもの
+
+  https://github.com/jigintern/sabera-team-e
+
+  同じインターンチームが作った星座版アプリから、次を移植しています。
+
+    - geo/Coordinates.kt      （sky/Coordinates.kt から。天文の関数を落として移設）
+    - alignment/ の 8 ファイル（YawDriftCorrector ほか。ヨードリフト補正は無改造）
+    - glass/ のグラス出力まわり（キャンバス予算・文字枠の調停・描き直しの方針）
+    - ui/component/ とビルド足場
+
+  どちらも同じ組織のリポジトリです。
+
+
+■ 同梱フォント
+
+  M PLUS Rounded 1c
+  SIL Open Font License 1.1
+  ライセンス全文は app/src/main/assets/licenses/m_plus_rounded_1c_ofl.txt に同梱
